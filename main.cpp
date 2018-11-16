@@ -9,23 +9,23 @@
 #include <map>
 #include <set>
 #include <vector>
-//#include <mpi.h>
+#include <mpi.h>
 #include "louvain.cpp"
 
-#define DISTANCE_THRESHOLD 10
+#define DISTANCE_THRESHOLD 5
 
 double distance(double x1, double y1, double x2, double y2) {
     return sqrt(pow(x1 - x2, 2) + pow(y1 - y2, 2));
 }
 
 int main(int argc, char *argv[]) {
-    int pointsToCreate = 200;
+    int pointsToCreate = 500;
 
-    int rank = 0, total_tasks;
-//    MPI_Init(&argc, &argv);
-//    MPI_Comm_size(MPI_COMM_WORLD, &total_tasks);
-//    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-//    MPI_Status stat;
+    int rank, total_tasks;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &total_tasks);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Status stat;
     if (rank == 0) { // TODO: remove!
 
         srandom(rank);
@@ -83,6 +83,6 @@ int main(int argc, char *argv[]) {
         }
     } // TODO: remove
 
-//    MPI_Finalize();
+    MPI_Finalize();
     return 0;
 }
