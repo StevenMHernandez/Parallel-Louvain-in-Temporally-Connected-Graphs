@@ -3,18 +3,6 @@
 
 #define MODULARITY_CHANGE_THRESHOLD 0.001
 
-int findInC(std::vector<std::set<int> > C, int v, int needle) {
-    for (int i = 0; i < v; i++) {
-        if (C[i].find(needle) != C[i].end()) {
-            return i;
-        }
-    }
-
-    assert(false);
-
-    return -1;
-}
-
 void louvain(int v, double **L, std::vector<std::set<int> > C) {
     // For all V, determine the weighted degree of vertex i, `k[i]`
     double *k = (double *) calloc(static_cast<size_t>(v), sizeof(double));
@@ -37,8 +25,11 @@ void louvain(int v, double **L, std::vector<std::set<int> > C) {
     double *C_int = (double *) malloc(v * sizeof(double)); // intra-community edges
     double *C_tot = (double *) malloc(v * sizeof(double)); // total-community edges
 
+    int *community_containing_ = (int *) malloc(v * sizeof(int)); // array containing the community identifier that some vertex `i` is in
+
     for (int i = 0; i < v; i++) {
         C[i].insert(i); // initialize each community to contain the node with the same namesake
+        community_containing_[i] = i;
         l[i] = i; // label each community
         C_int[i] = 0; // initialize intra-community edges
         C_tot[i] = 0; // initialize total-community edges
@@ -57,22 +48,21 @@ void louvain(int v, double **L, std::vector<std::set<int> > C) {
     while (true) {
         epoch++;
         for (int i = 0; i < v; i++) {
-            int C_old_index = findInC(C, v, i);
+            int C_old_index = community_containing_[i];
             std::set<int> N_i = std::set<int>(); // Communities to try
             N_i.insert(C_old_index);
             for (int j = 0; j < v; j++) { // add the community of each adjacent point `j` to `i`
                 if (i != j && L[i][j] != -1) { // TODO: remove this for the general case
-                    N_i.insert(findInC(C, v, j));
+                    N_i.insert(community_containing_[j]);
                 }
             }
             double maxGain = 0;
             int C_new_index = C_old_index;
             for (auto it = N_i.begin(); it != N_i.end(); it++) {
-                int c = *it;
+                int c = *it; // potential community `c` to move `i` into
                 /*
-                 * Caculate change in Q_{i->c}
+                 * Calculate change in Q_{i->c}
                  */
-                // TODO: probably remove these loops, or make them more compact (as in remove the need for them duplicated later on in the codebase
                 for (int cc = 0; cc < C.size(); cc++) {
                     if (!C[cc].empty()) {
                         C_int[cc] = 0;
@@ -98,11 +88,11 @@ void louvain(int v, double **L, std::vector<std::set<int> > C) {
                     e_xx += C_int[cc];
                     a2_x += pow(C_tot[cc], 2);
                 }
-                // END TODO: removal
+
                 double e_ij = C_int[c];
                 double e_ii = C_int[i];
 
-                double curGain = (e_ij - (e_ii - C_int[c])/ m)
+                double curGain = (e_ij - (e_ii - C_int[c]) / m)
                                  + ((2 * k[i] * (C_tot[i] - L[i][c]) - 2 * k[i] * C_tot[c]) / pow(2 * m, 2));
 
                 if (curGain > maxGain || (curGain == maxGain && l[c] < l[C_new_index])) {
@@ -113,6 +103,7 @@ void louvain(int v, double **L, std::vector<std::set<int> > C) {
             if (maxGain > 0) {
                 C[C_old_index].erase(i);
                 C[C_new_index].insert(i);
+                community_containing_[i] = C_new_index;
             }
         }
 
@@ -125,7 +116,7 @@ void louvain(int v, double **L, std::vector<std::set<int> > C) {
 
         for (int i = 0; i < v; i++) {
             for (int j = 0; j < v; j++) {
-                if (findInC(C, v, i) == findInC(C, v, j)) {
+                if (community_containing_[i] == community_containing_[j]) {
                     C_int[i] += L[i][j];
                     C_tot[i] += L[i][j];
                 } else {
