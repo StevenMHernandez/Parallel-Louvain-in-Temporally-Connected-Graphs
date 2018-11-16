@@ -11,8 +11,8 @@
 #include <vector>
 //#include <mpi.h>
 
-#define THRESHOLD 10
-#define MODULARITY_THRESHOLD 0.9
+#define DISTANCE_THRESHOLD 10
+#define MODULARITY_CHANGE_THRESHOLD 0.001
 
 int findInC(std::vector<std::set<int> > C, int v, int needle) {
     for (int i = 0; i < v; i++) {
@@ -31,7 +31,7 @@ void louvain(int v, double **L, std::vector<std::set<int> > C) {
     double *k = (double *) calloc(static_cast<size_t>(v), sizeof(double));
     for (int i = 0; i < v; i++) { // for all vertices
         for (int j = 0; j < v; j++) {// for all connected vertices
-            if (L[i][j] != -1) { // TODO: remove this for the general case
+            if (i != j && L[i][j] != -1) { // TODO: remove this for the general case
                 k[i] += L[i][j];
             }
         }
@@ -52,10 +52,11 @@ void louvain(int v, double **L, std::vector<std::set<int> > C) {
         C[i].insert(i); // initialize each community to contain the node with the same namesake
         l[i] = i; // label each community
         C_int[i] = 0; // initialize intra-community edges
+        C_tot[i] = 0; // initialize total-community edges
 
         for (int j = 0; j < v; j++) {
-            if (L[i][j] != -1) { // TODO: remove this for the general case
-                C_int[i] += L[i][j];
+            if (i != j && L[i][j] != -1) { // TODO: remove this for the general case
+                C_tot[i] += L[i][j];
             }
         }
     }
@@ -68,16 +69,17 @@ void louvain(int v, double **L, std::vector<std::set<int> > C) {
         epoch++;
         for (int i = 0; i < v; i++) {
             int C_old_index = findInC(C, v, i);
-            int C_new_index = -1;
-            std::set<int> c_old = C[C_old_index], N_i = C[C_old_index];
-            for (int j = 0; j < v; j++) {
+            std::set<int> N_i = std::set<int>(); // Communities to try
+            N_i.insert(C_old_index);
+            for (int j = 0; j < v; j++) { // add the community of each adjacent point `j` to `i`
                 if (i != j && L[i][j] != -1) { // TODO: remove this for the general case
-                    N_i.insert(C[j].begin(), C[j].end());
+                    N_i.insert(findInC(C, v, j));
                 }
             }
             double maxGain = 0;
-            std::set<int> C_new = c_old;
-            for (int c = 0; c < N_i.size(); c++) {
+            int C_new_index = C_old_index;
+            for (auto it = N_i.begin(); it != N_i.end(); it++) {
+                int c = *it;
                 /*
                  * Caculate change in Q_{i->c}
                  */
@@ -90,12 +92,14 @@ void louvain(int v, double **L, std::vector<std::set<int> > C) {
                 }
                 for (int ii = 0; ii < v; ii++) {
                     for (int j = 0; j < v; j++) {
-                        if (C[ii] == C[j]) {
-                            C_int[ii] += L[ii][j];
-                            C_tot[ii] += L[ii][j];
-                        } else {
-                            C_tot[ii] += L[ii][j];
-                            C_tot[j] += L[ii][j];
+                        if (i != j && L[i][j] != -1) { // TODO: remove this for the general case
+                            if (C[ii] == C[j]) {
+                                C_int[ii] += L[ii][j];
+                                C_tot[ii] += L[ii][j];
+                            } else {
+                                C_tot[ii] += L[ii][j];
+                                C_tot[j] += L[ii][j];
+                            }
                         }
                     }
                 }
@@ -112,18 +116,13 @@ void louvain(int v, double **L, std::vector<std::set<int> > C) {
                 double curGain = (e_ij - (e_ii - C_int[c])/ m)
                         + ((2 * k[i] * (C_tot[i] - L[i][c]) - 2 * k[i] * C_tot[c]) / pow(2 * m, 2));
 
-//                if (curGain > maxGain || (curGain == maxGain && l[c] < l[C_new_index])) {
-                if (curGain > maxGain || (curGain == maxGain && c < C_new_index)) {
+                if (curGain > maxGain || (curGain == maxGain && l[c] < l[C_new_index])) {
                     maxGain = curGain;
-                    C_new = C[c]; // TODO: things are going to get lost like this aren't they???
                     C_new_index = c;
                 }
             }
-//            printf("max_gain,%lf\n", maxGain);
             if (maxGain > 0) {
                 C[C_old_index].erase(i);
-
-//                C[C_new_index] = C_new;
                 C[C_new_index].insert(i);
             }
         }
@@ -148,14 +147,19 @@ void louvain(int v, double **L, std::vector<std::set<int> > C) {
         }
         double e_xx = 0;
         double a2_x = 0;
-
         for (int c = 0; c < C.size(); c++) {
-            e_xx += C_int[c];
-            a2_x += pow(C_tot[c], 2);
+            if (!C[c].empty()) {
+                e_xx += C_int[c];
+                a2_x += pow(C_tot[c], 2);
+            }
         }
         Q_c = (e_xx / m) - (a2_x / pow(2 * m, 2));
 
-        if (abs((Q_c - Q_p) / Q_p) < MODULARITY_THRESHOLD) {
+        // Print the current state of learning
+        // format: "identifier,epoch,current modularity,change in modularity"
+        printf("epoch,%i,%lf,%lf\n", epoch, Q_c, abs((Q_c - Q_p) / Q_p));
+
+        if (abs((Q_c - Q_p) / Q_p) < MODULARITY_CHANGE_THRESHOLD) {
             for (int c = 0; c < C.size(); c++) {
                 if (!C[c].empty()) {
                     for (auto it = C[c].begin(); it != C[c].end(); it++) {
@@ -167,7 +171,6 @@ void louvain(int v, double **L, std::vector<std::set<int> > C) {
             }
             break;
         } else {
-            printf("try_again,%i,%lf,%lf\n", epoch, Q_c, abs((Q_c - Q_p) / Q_p));
             Q_p = Q_c;
         }
     }
@@ -215,8 +218,8 @@ int main(int argc, char *argv[]) {
 
             for (int j = 0; j < pointsToCreate; j++) {
                 double d = distance(points[i * 2], points[(i * 2) + 1], points[j * 2], points[(j * 2) + 1]);
-                L[i][j] = d < THRESHOLD ? d : -1;
-//                L[i][j] = d < THRESHOLD ? 1 : -1;
+                L[i][j] = d < DISTANCE_THRESHOLD ? d : -1;
+//                L[i][j] = d < DISTANCE_THRESHOLD ? 1 : -1;
 
 
                 if (L[i][j] != -1) {
